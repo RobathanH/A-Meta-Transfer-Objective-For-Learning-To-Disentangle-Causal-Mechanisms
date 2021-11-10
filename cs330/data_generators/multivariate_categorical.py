@@ -11,8 +11,10 @@ in which each node is an N-way categorical variable, and functions between
 nodes are parametrized as 2 layer neural networks.
 '''
 
-# Constants
-
+# TODO:
+# - Save and load particular functional graphs (both the graph and the parametrization)
+# - Is there a better way to create transfer distributions? causal/models has alterdist() function which only changes W1 and sets B1 to 0
+# - Move all torch tensors to host device (cuda or cpu)
 
 
 class MultiCategorical:

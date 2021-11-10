@@ -12,6 +12,11 @@ are ordered such that node i can only depend on nodes with index j < i.
 This may require reordering node indices when sending them to a model.
 '''
 
+# TODO: 
+# - Save and load specific graphs
+# - Generate short IDs to reference specific graphs
+
+
 # Constants
 
 # When sampling a random causal graph, this is the maximum bernoulli probability for
