@@ -1,6 +1,8 @@
-torch==1.0.0
+torch==1.1.0
 numpy
 jupyter
 tqdm
 matplotlib
 scipy
+networkx
+pydot
