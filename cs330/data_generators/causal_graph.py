@@ -1,3 +1,4 @@
+from typing import Dict
 import numpy as np
 import networkx as nx
 import pydot
@@ -59,10 +60,13 @@ class CausalGraph:
 
     '''
     Visualize graph structure with networkx
+    Args:
+        labels ({int -> str}):  Optional dictionary mapping some node indices to string labels
+                                If given, any node indices not included will have no label
     '''
-    def visualize(self):
+    def visualize(self, labels: Dict[int, str] = None):
         G = nx.from_numpy_matrix(self.B.T, create_using=nx.DiGraph)
-        return nx.draw(G, with_labels=True, pos=graphviz_layout(G, prog='dot'))
+        return nx.draw(G, labels=labels, with_labels=True, pos=graphviz_layout(G, prog='dot'))
 
     '''
     Checks if a given variable index is a root variable in this graph
