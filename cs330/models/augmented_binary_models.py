@@ -1,11 +1,9 @@
-from typing import Iterable
-import numpy as np
+from typing import Iterable, List
 from itertools import chain
+import numpy as np
 
 import torch
 import torch.nn as nn
-
-from causal_meta.utils.torch_utils import logsumexp
 
 # Constants
 EPS = 1e-9 # to avoid divide-by-zero error in log
@@ -123,21 +121,13 @@ class AssociatedModel(nn.Module, HypothesisModel):
 
 # --- OVERALL STRUCTURAL MODEL ---
 
+'''
+Interface for a structural model which can store and meta-train the causal
+relationship between two variables from a multivariate functional causal model
+'''
 class BinarySubsetStructuralModel(nn.Module):
-    def __init__(self, N, M, a_ind, b_ind):
-        nn.Module.__init__(self)
-
-        self.N = N
-
-        # Hypothesis models
-        self.HYPOTHESIS_COUNT = 2
-        self.model_A_B = CauseModel(N, M, a_ind, b_ind)
-        self.model_B_A = CauseModel(N, M, b_ind, a_ind)
-        #self.model_independent = IndependentModel(N, M, a_ind, b_ind)
-        #self.model_association = AssociatedModel(N, M, a_ind, b_ind)
-
-        # Structural parameters to measure likelihood of each hypothesis
-        self.gamma = nn.Parameter(torch.zeros(self.HYPOTHESIS_COUNT))
+    def __init__(self):
+        super(BinarySubsetStructuralModel, self).__init__()
 
     '''
     Forward pass computes the online log likelihood of the given samples,
@@ -153,7 +143,66 @@ class BinarySubsetStructuralModel(nn.Module):
         (torch.FloatTensor):            Overall log likelihood of the given samples under
                                         this model's current parameters.
     '''
-    def forward(self, samples):
+    def forward(self, samples: torch.FloatTensor) -> torch.FloatTensor:
+        raise NotImplementedError
+
+    '''
+    Set all hypothesis model parameters to maximize likelihood of given samples.
+    Used as pretraining before hypothesis models train on transfer distribution.
+    Args:
+        samples (torch.FloatTensor):    Samples from some causal distribution.
+                                        Each sample in the batch contains M one-hot
+                                        arrays of size N, each corresponding to a
+                                        categorical value
+                                        Shape = (batch_size, M, N)
+    '''
+    def set_maximum_likelihood(self, samples: torch.FloatTensor) -> None:
+        raise NotImplementedError
+
+    def reset_structure_parameters(self) -> None:
+        raise NotImplementedError
+
+    def structure_parameters(self) -> List[nn.Parameter]:
+        raise NotImplementedError
+
+    def hypothesis_models(self) -> List[HypothesisModel]:
+        raise NotImplementedError
+
+    def hypothesis_structure_likelihoods(self) -> List[float]:
+        raise NotImplementedError
+
+    def hypothesis_names(self) -> List[str]:
+        raise NotImplementedError
+
+    def hypothesis_count(self) -> int:
+        raise NotImplementedError
+
+    # Non-abstract functions
+    def hypothesis_parameters(self) -> List[nn.Parameter]:
+        params = []
+        for h_model in self.hypothesis_models():
+            params += list(h_model.parameters())
+        return params
+    
+
+class CauseOnlyBinaryStructureModel(BinarySubsetStructuralModel):
+    def __init__(self, N: int, M: int, a_ind: int, b_ind: int) -> None:
+        super(CauseOnlyBinaryStructureModel, self).__init__()
+
+        self.N = N
+
+        # Hypothesis models
+        self.HYPOTHESIS_COUNT = 2
+        self.model_A_B = CauseModel(N, M, a_ind, b_ind)
+        self.model_B_A = CauseModel(N, M, b_ind, a_ind)
+        #self.model_independent = IndependentModel(N, M, a_ind, b_ind)
+        #self.model_association = AssociatedModel(N, M, a_ind, b_ind)
+
+        # Structural parameters to measure likelihood of each hypothesis
+        self.gamma = nn.Parameter(torch.zeros(self.HYPOTHESIS_COUNT))
+
+    
+    def forward(self, samples: torch.FloatTensor) -> torch.FloatTensor:
         log_model_weights = self.gamma - torch.logsumexp(self.gamma, dim=0)
 
         # Weighted log likelihood for each hypothesis
@@ -171,38 +220,27 @@ class BinarySubsetStructuralModel(nn.Module):
         )
 
 
-    '''
-    Set all hypothesis model parameters to maximize likelihood of given samples.
-    Used as pretraining before hypothesis models train on transfer distribution.
-    Args:
-        samples (torch.FloatTensor):    Samples from some causal distribution.
-                                        Each sample in the batch contains M one-hot
-                                        arrays of size N, each corresponding to a
-                                        categorical value
-                                        Shape = (batch_size, M, N)
-    '''
     def set_maximum_likelihood(self, samples: torch.FloatTensor) -> None:
         self.model_A_B.set_maximum_likelihood(samples)
         self.model_B_A.set_maximum_likelihood(samples)
 
-    '''
-    Return iterable of all inner-loop hypothesis model parameters
-    '''
-    def hypothesis_parameters(self) -> Iterable[nn.Parameter]:
-        return chain(
-            self.model_A_B.parameters(),
-            self.model_B_A.parameters()
-        )
-
-    '''
-    Return iterable of all outer-loop structure model parameters
-    '''
-    def structure_parameters(self) -> Iterable[nn.Parameter]:
+    def structure_parameters(self) -> List[nn.Parameter]:
         return [self.gamma]
 
-    '''
-    Resets all structure parameters, so weight is evenly distributed between
-    all hypotheses
-    '''
     def reset_structure_parameters(self) -> None:
         self.gamma.data = torch.zeros(self.HYPOTHESIS_COUNT)
+
+    def hypothesis_models(self) -> List[HypothesisModel]:
+        return [
+            self.model_A_B,
+            self.model_B_A
+        ]
+
+    def hypothesis_structure_likelihoods(self) -> torch.FloatTensor:
+        return torch.exp(self.gamma - torch.logsumexp(self.gamma, dim=0))
+
+    def hypothesis_names(self) -> List[str]:
+        return ["A -> B", "B -> A"]
+
+    def hypothesis_count(self) -> int:
+        return 2
