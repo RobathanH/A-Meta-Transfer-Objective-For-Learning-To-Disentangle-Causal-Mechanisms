@@ -168,7 +168,7 @@ class BinarySubsetStructuralModel(nn.Module):
     def hypothesis_models(self) -> List[HypothesisModel]:
         raise NotImplementedError
 
-    def hypothesis_structure_likelihoods(self) -> List[float]:
+    def structure_likelihoods(self) -> List[float]:
         raise NotImplementedError
 
     def hypothesis_names(self) -> List[str]:
@@ -236,8 +236,8 @@ class CauseOnlyBinaryStructureModel(BinarySubsetStructuralModel):
             self.model_B_A
         ]
 
-    def hypothesis_structure_likelihoods(self) -> torch.FloatTensor:
-        return torch.exp(self.gamma - torch.logsumexp(self.gamma, dim=0))
+    def structure_likelihoods(self) -> torch.FloatTensor:
+        return torch.exp(self.gamma - torch.logsumexp(self.gamma, dim=0)).detach()
 
     def hypothesis_names(self) -> List[str]:
         return ["A -> B", "B -> A"]

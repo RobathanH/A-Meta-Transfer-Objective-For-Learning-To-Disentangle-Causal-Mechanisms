@@ -65,7 +65,7 @@ class MultiCategorical:
                             where the final axis contains 1-hot representations
                             of node values
     '''
-    def sample(self, batch_size: int = 1):
+    def sample(self, batch_size: int = 1) -> torch.FloatTensor:
         with torch.no_grad():
             node_vals = torch.zeros(batch_size, self.M * self.N).type(torch.FloatTensor)
             for i in range(self.M):
