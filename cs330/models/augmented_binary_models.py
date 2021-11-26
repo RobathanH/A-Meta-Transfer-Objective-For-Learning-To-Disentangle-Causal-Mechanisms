@@ -1,5 +1,5 @@
-from typing import Iterable, List
-from itertools import chain
+from typing import Dict, List
+from enum import Enum
 import numpy as np
 
 import torch
@@ -8,7 +8,23 @@ import torch.nn as nn
 # Constants
 EPS = 1e-9 # to avoid divide-by-zero error in log
 
+'''
+Enum representing each possible binary relationship between two nodes.
+Termed as hypotheses, since structural model contains multiple models,
+each assuming and parametrizing a particular one of these relationships.
+'''
+class Hypothesis(Enum):
+    FORWARD_CAUSE = 1
+    BACKWARD_CAUSE = 2
+    INDEPENDENT = 3
 
+    def name(self):
+        if self is Hypothesis.FORWARD_CAUSE:
+            return "A -> B"
+        if self is Hypothesis.BACKWARD_CAUSE:
+            return "B -> A"
+        if self is Hypothesis.INDEPENDENT:
+            return "A || B"
 
 '''
 Class interface for a model representing a particular possible relationship between
@@ -125,26 +141,9 @@ class AssociatedModel(nn.Module, HypothesisModel):
 Interface for a structural model which can store and meta-train the causal
 relationship between two variables from a multivariate functional causal model
 '''
-class BinarySubsetStructuralModel(nn.Module):
+class BinarySubsetStructuralModel:
     def __init__(self):
         super(BinarySubsetStructuralModel, self).__init__()
-
-    '''
-    Forward pass computes the online log likelihood of the given samples,
-    given the current parameters of each hypothesis model, weighed by softmax
-    of gamma, which is the current likelihood of each hypothesis being true
-    Args:
-        samples (torch.FloatTensor):    Samples from some causal distribution.
-                                        Each sample in the batch contains M one-hot
-                                        arrays of size N, each corresponding to a
-                                        categorical value
-                                        Shape = (batch_size, M, N)
-    Returns:
-        (torch.FloatTensor):            Overall log likelihood of the given samples under
-                                        this model's current parameters.
-    '''
-    def forward(self, samples: torch.FloatTensor) -> torch.FloatTensor:
-        raise NotImplementedError
 
     '''
     Set all hypothesis model parameters to maximize likelihood of given samples.
@@ -156,33 +155,84 @@ class BinarySubsetStructuralModel(nn.Module):
                                         categorical value
                                         Shape = (batch_size, M, N)
     '''
-    def set_maximum_likelihood(self, samples: torch.FloatTensor) -> None:
+    def pretrain_hypotheses(self, samples: torch.FloatTensor) -> None:
         raise NotImplementedError
 
+    '''
+    Computes the log likelihood of the given samples under each hypothesis,
+    given the current parameters of each hypothesis model. Returns the
+    current log likelihood for each current hypothesis model, allowing them to
+    be backpropogated to train the hypothesis models, and accumulated for 
+    use in the regret function.
+    Args:
+        samples (torch.FloatTensor):    Samples from some causal distribution.
+                                        Each sample in the batch contains M one-hot
+                                        arrays of size N, each corresponding to a
+                                        categorical value
+                                        Shape = (batch_size, M, N)
+    Returns:
+        (torch.FloatTensor):            Log likelihood of the given samples under
+                                        each hypothesis model's current parameters.
+    '''
+    def hypothesis_log_likelihoods(self, samples: torch.FloatTensor) -> torch.FloatTensor:
+        raise NotImplementedError
+
+    '''
+    Use the accumulated online log likelihood for each hypothesis model to return
+    the regret value, which weighs online losses by the structure parameters for
+    each hypothesis.
+    Args:
+        hypothesis_online_log_likelihoods (torch.FloatTensor):  Sum of log likelihoods over training
+                                                                for each hypothesis, with list elements
+                                                                corresponding to hypothesis order returned in
+                                                                hypotheses() and hypothesis_log_likelihoods().
+    Returns:
+        (torch.FloatTensor):                                    Regret loss function for meta-training step.
+    '''
+    def structure_regret(self, hypothesis_online_log_likelihoods: torch.FloatTensor) -> torch.FloatTensor:
+        raise NotImplementedError
+
+    '''
+    Reset all structure parameters so all possible hypotheses have equal weights.
+    '''
     def reset_structure_parameters(self) -> None:
         raise NotImplementedError
 
+    # --- Logging and info methods
+
+    '''
+    Returns all parameters for weighing between hypotheses
+    '''
     def structure_parameters(self) -> List[nn.Parameter]:
         raise NotImplementedError
 
-    def hypothesis_models(self) -> List[HypothesisModel]:
+    '''
+    Returns all parameters for independent hypothesis models
+    '''
+    def hypothesis_parameters(self) -> List[nn.Parameter]:
         raise NotImplementedError
 
-    def structure_likelihoods(self) -> List[float]:
-        raise NotImplementedError
-
-    def hypothesis_names(self) -> List[str]:
-        raise NotImplementedError
-
+    '''
+    Returns the number of hypotheses considered by this structure model.
+    Corresponds to the length of many returned lists and first dim of many
+    returned tensors.
+    '''
     def hypothesis_count(self) -> int:
         raise NotImplementedError
 
-    # Non-abstract functions
-    def hypothesis_parameters(self) -> List[nn.Parameter]:
-        params = []
-        for h_model in self.hypothesis_models():
-            params += list(h_model.parameters())
-        return params
+    '''
+    Returns list of Hypothesis enum corresponding to each hypothesis model
+    in order.
+    '''
+    def hypotheses(self) -> List[Hypothesis]:
+        raise NotImplementedError
+
+    '''
+    Returns detached tensor listing current structure parameter likelihoods
+    for each hypothesis.
+    '''
+    def structure_likelihoods(self) -> torch.FloatTensor:
+        raise NotImplementedError
     
 
 class CauseOnlyBinaryStructureModel(BinarySubsetStructuralModel):
@@ -191,56 +241,60 @@ class CauseOnlyBinaryStructureModel(BinarySubsetStructuralModel):
 
         self.N = N
 
-        # Hypothesis models
-        self.HYPOTHESIS_COUNT = 2
-        self.model_A_B = CauseModel(N, M, a_ind, b_ind)
-        self.model_B_A = CauseModel(N, M, b_ind, a_ind)
-        #self.model_independent = IndependentModel(N, M, a_ind, b_ind)
-        #self.model_association = AssociatedModel(N, M, a_ind, b_ind)
-
-        # Structural parameters to measure likelihood of each hypothesis
-        self.gamma = nn.Parameter(torch.zeros(self.HYPOTHESIS_COUNT))
-
-    
-    def forward(self, samples: torch.FloatTensor) -> torch.FloatTensor:
-        log_model_weights = self.gamma - torch.logsumexp(self.gamma, dim=0)
-
-        # Weighted log likelihood for each hypothesis
-        model_A_B_logL = log_model_weights[0] + torch.sum(self.model_A_B(samples))
-        model_B_A_logL = log_model_weights[1] + torch.sum(self.model_B_A(samples))
-        
-        # Remove max contribution
-        shared_logL = torch.max(model_A_B_logL, model_B_A_logL)
-        remaining_model_A_B_logL = model_A_B_logL - shared_logL
-        remaining_model_B_A_logL = model_B_A_logL - shared_logL
-
-        return shared_logL + torch.log(
-            torch.exp(remaining_model_A_B_logL) +
-            torch.exp(remaining_model_B_A_logL)
-        )
-
-
-    def set_maximum_likelihood(self, samples: torch.FloatTensor) -> None:
-        self.model_A_B.set_maximum_likelihood(samples)
-        self.model_B_A.set_maximum_likelihood(samples)
-
-    def structure_parameters(self) -> List[nn.Parameter]:
-        return [self.gamma]
-
-    def reset_structure_parameters(self) -> None:
-        self.gamma.data = torch.zeros(self.HYPOTHESIS_COUNT)
-
-    def hypothesis_models(self) -> List[HypothesisModel]:
-        return [
-            self.model_A_B,
-            self.model_B_A
+        # Hypothesis list (corresponds to model lists and structure)
+        self.hypothesis_list = [
+            Hypothesis.FORWARD_CAUSE,
+            Hypothesis.BACKWARD_CAUSE
         ]
 
-    def structure_likelihoods(self) -> torch.FloatTensor:
-        return torch.exp(self.gamma - torch.logsumexp(self.gamma, dim=0)).detach()
+        # Hypothesis models
+        self.hypothesis_models = [
+            CauseModel(N, M, a_ind, b_ind),
+            CauseModel(N, M, b_ind, a_ind)
+        ]
 
-    def hypothesis_names(self) -> List[str]:
-        return ["A -> B", "B -> A"]
+        # Structural parameters to measure likelihood of each hypothesis
+        # These weights are passed through softmax to get structure likelihoods
+        self.hypothesis_weights = nn.Parameter(torch.zeros(self.hypothesis_count()))
 
+    def pretrain_hypotheses(self, samples: torch.FloatTensor) -> None:
+        for model in self.hypothesis_models:
+            model.set_maximum_likelihood(samples)
+
+    def hypothesis_log_likelihoods(self, samples: torch.FloatTensor) -> torch.FloatTensor:
+        # Compute current log likelihood for each hypothesis, and
+        # return dict of hypothesis losses for backpropagation
+        result = torch.zeros(self.hypothesis_count())
+        for i in range(self.hypothesis_count()):
+            result[i] = torch.sum(self.hypothesis_models[i](samples))
+        return result
+
+    def structure_regret(self, hypothesis_online_log_likelihoods: List[float]) -> torch.FloatTensor:
+        log_softmax_weights = self.hypothesis_weights - torch.logsumexp(self.hypothesis_weights, dim=0)
+
+        # Save structure-weighted log likelihood for each hypothesis
+        weighted_hypothesis_online_logL = log_softmax_weights + hypothesis_online_log_likelihoods
+        
+        # Regret = negative log of weighted sum of online likelihoods
+        return -torch.logsumexp(weighted_hypothesis_online_logL, dim=0)
+
+    def reset_structure_parameters(self) -> None:
+        self.hypothesis_weights.data = torch.zeros(self.hypothesis_count())
+
+    def structure_parameters(self) -> List[nn.Parameter]:
+        return [self.hypothesis_weights]
+
+    def hypothesis_parameters(self) -> List[nn.Parameter]:
+        params = []
+        for model in self.hypothesis_models:
+            params += list(model.parameters())
+        return params
+
+    def hypotheses(self) -> List[Hypothesis]:
+        return self.hypothesis_list
+    
     def hypothesis_count(self) -> int:
-        return 2
+        return len(self.hypothesis_list)
+
+    def structure_likelihoods(self) -> torch.FloatTensor:
+        return torch.exp(self.hypothesis_weights - torch.logsumexp(self.hypothesis_weights, dim=0)).detach()

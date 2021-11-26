@@ -78,7 +78,7 @@ class AugmentedBinaryModelTrainer:
     '''
     def train_transfer_episode(self) -> None:
         # Reset hypothesis models to pretrain distribution state
-        self.structural_model.set_maximum_likelihood(self.pretrain_samples)
+        self.structural_model.pretrain_hypotheses(self.pretrain_samples)
 
         # Adjust root variable distributions in causal graph, initializing a
         # new transfer distribution
@@ -86,23 +86,24 @@ class AugmentedBinaryModelTrainer:
         transfer_samples = self.data_generator.sample(self.transfer_episode_batch_size)
 
         # Zero all model gradients to be safe
-        self.structural_model.zero_grad()
+        self.hypothesis_opt.zero_grad()
+        self.structural_opt.zero_grad()
 
         # Accumulate log likelihood over training for structural model
-        structural_model_regret = torch.tensor(0.)
+        hypothesis_online_log_likelihoods = torch.zeros(self.structural_model.hypothesis_count())
         for grad_step in range(self.transfer_episode_gradient_steps):
-            # Add to meta-loss
-            structural_model_regret += -torch.mean(self.structural_model(transfer_samples))
-            
             # Perform inner-loop gradient step
             self.hypothesis_opt.zero_grad()
-            total_hypothesis_model_loss = torch.tensor(0.)
-            for hypothesis_model in self.structural_model.hypothesis_models():
-                total_hypothesis_model_loss += -torch.mean(hypothesis_model(transfer_samples))
-            total_hypothesis_model_loss.backward()
+            hypothesis_logL = self.structural_model.hypothesis_log_likelihoods(transfer_samples)
+            inner_loop_loss = -torch.sum(hypothesis_logL) # backprop will work on each hypothesis individually
+            inner_loop_loss.backward()
             self.hypothesis_opt.step()
+
+            # Accumulate each hypothesis log likelihood into online log likelihood
+            hypothesis_online_log_likelihoods += hypothesis_logL.detach()
 
         # Perform outer-loop gradient step
         self.structural_opt.zero_grad()
-        structural_model_regret.backward()
+        outer_loop_loss = self.structural_model.structure_regret(hypothesis_online_log_likelihoods)
+        outer_loop_loss.backward()
         self.structural_opt.step()
