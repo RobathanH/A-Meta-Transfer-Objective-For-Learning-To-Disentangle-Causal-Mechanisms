@@ -52,11 +52,11 @@ class AugmentedBinaryModelTrainer:
         self.structural_opt = torch.optim.RMSprop(self.structural_model.structure_parameters(), lr=self.outer_lr)
 
         # Logging buffers
-        self.structure_likelihoods = torch.zeros((self.transfer_episode_count, self.structural_model.hypothesis_count())).detach()
+        self.structure_likelihoods = torch.zeros((self.transfer_episode_count + 1, self.structural_model.hypothesis_count())).detach()
 
     def reset(self) -> None:
         self.structural_model.reset_structure_parameters()
-        self.structure_likelihoods = torch.zeros((self.transfer_episode_count, self.structural_model.hypothesis_count())).detach()
+        self.structure_likelihoods = torch.zeros((self.transfer_episode_count + 1, self.structural_model.hypothesis_count())).detach()
 
     def hypothesis_count(self) -> int:
         return self.structural_model.hypothesis_count()
@@ -67,11 +67,13 @@ class AugmentedBinaryModelTrainer:
     Train structure parameters over multiple transfer episodes
     '''
     def train_structure(self) -> None:
+        self.structure_likelihoods[0, :] = self.structural_model.structure_likelihoods()
+
         range = tnrange(self.transfer_episode_count, leave=False)
         for transfer_episode in range:
             self.train_transfer_episode()
-            self.structure_likelihoods[transfer_episode, :] = self.structural_model.structure_likelihoods()
-            range.set_postfix(structure_likelihoods=self.structural_model.structure_likelihoods().tolist())
+            self.structure_likelihoods[transfer_episode + 1, :] = self.structural_model.structure_likelihoods()
+            range.set_postfix(structure_likelihoods=[round(l, 3) for l in self.structural_model.structure_likelihoods().tolist()])
 
     '''
     Train on a single transfer episode 
