@@ -114,10 +114,6 @@ class NodeFunction(nn.Module):
         self.layer1 = nn.Linear(N * M, H)
         self.layer2 = nn.Linear(H, N)
 
-        # Remove grad
-        for p in self.parameters():
-            p.requires_grad = False
-
         # Random initialization
         self.reset()
 
