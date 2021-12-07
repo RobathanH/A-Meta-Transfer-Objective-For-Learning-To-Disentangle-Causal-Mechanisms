@@ -266,7 +266,7 @@ class FullGraphCausalParentMultivariateModel:
             hypothesis_online_log_likelihoods = hypothesis_online_log_likelihoods.permute(1, 0).reshape(self.M, 1, -1)  # Shape = (M, 1, K) (target_node, null, hypothesis_sample_number)
             
             # We only need relative online likelihoods (no log) of each sample hypothesis (for each target node)
-            hypothesis_relative_online_L = torch.softmax(hypothesis_online_log_likelihoods, dim=1)                      # Shae = (M, M, K)
+            hypothesis_relative_online_L = torch.softmax(hypothesis_online_log_likelihoods, dim=2)                      # Shape = (M, 1, K)
 
             # Base gradients are determined by difference between bernoulli probability (sigmoid) and hypothesis value, before being summed over
             # all hypotheses, weighted by the relative online likelihoods of each hypothesis
