@@ -23,7 +23,7 @@ class AllHypotheses_FullCausalGraphMultivariateModel(CausalParentMultivariateMod
         self.HYPOTHESIS_REPEATS = 3
 
         # Compute all possible directed acyclical graphs, to store and train a hypothesis model for each
-        self.all_hypotheses = torch.from_numpy(all_acyclic_causal_graphs(self.M)).detach()
+        self.all_hypotheses = torch.from_numpy(all_acyclic_causal_graphs(self.M)).detach().type(torch.FloatTensor)
 
         # Hypotheses will be referenced internally via index, so we create
         # a dict to quickly find hypothesis index from tensor
@@ -135,7 +135,7 @@ class AllHypotheses_IndependentEdgeFullCausalGraphMultivariateModel(CausalParent
         self.HYPOTHESIS_REPEATS = 3
 
         # Compute all possible directed acyclical graphs, to store and train a hypothesis model for each
-        self.all_hypotheses = torch.from_numpy(all_acyclic_causal_graphs(self.M)).detach()
+        self.all_hypotheses = torch.from_numpy(all_acyclic_causal_graphs(self.M)).detach().type(torch.FloatTensor)
 
         # Hypotheses will be referenced internally via index, so we create
         # a dict to quickly find hypothesis index from tensor

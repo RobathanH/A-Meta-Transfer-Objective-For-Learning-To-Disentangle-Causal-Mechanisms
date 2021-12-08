@@ -272,7 +272,7 @@ class AllHypotheses_CausalParentMultivariateModel(CausalParentMultivariateModel)
         # Compute list of all possible hypotheses.
         # Since each target node's structure is learned independently, exhaustive list must
         # only cover each possible set of parents, thus 2^(M - 1) entries
-        self.all_hypotheses = torch.from_numpy(all_causal_parent_graphs(self.M)).detach()
+        self.all_hypotheses = torch.from_numpy(all_causal_parent_graphs(self.M)).detach().type(torch.FloatTensor)
 
     '''
     Return all possible hypotheses, not just a repeatedly sampled set of hypotheses
